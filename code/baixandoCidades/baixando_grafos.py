@@ -5,6 +5,8 @@ import threading
 import pandas as pd
 import argparse
 from concurrent.futures import ThreadPoolExecutor as Executor
+from timeit import default_timer as timer
+import time
 ox.__version__
 
 class GraphSaver():
@@ -27,16 +29,10 @@ class GraphSaver():
             [executor.submit(self._download_and_save_graph_from_place, place_id, place_name, verbose, print_every) for place_id, place_name in places_names_and_ids]
     
     def _download_and_save_graph_from_place(self, place_id:int, place_name:str, verbose:bool, print_every:int):
-        
-        if verbose:
-            with self._download_counter_lock:
-                if self._download_counter % print_every == 0:
-                    print(f"({place_id}, {place_name})")
-
-                self._download_counter += 1
             
         try:
-            G = ox.graph_from_place(place_name, network_type="drive")
+            cf = '["highway"~"primary|secondary|tertiary|residential"]'
+            G = ox.graph_from_place(place_name, network_type="drive", custom_filter=cf)
         except:
             with self._error_lock:
                 self.error_list.append((place_id, place_name))    
@@ -44,6 +40,13 @@ class GraphSaver():
         
         graph_file = self.graph_folder / f'{place_id}.graphml'
         ox.io.save_graphml(G, graph_file)
+
+        if verbose:
+            with self._download_counter_lock:
+                if self._download_counter % print_every == 0:
+                    print(f"Terminou ({place_id}, {place_name})")
+
+                self._download_counter += 1
 
         n_nodes = len(G.nodes)
         n_edges = len(G.edges)
@@ -91,26 +94,55 @@ class GraphSaver():
 
         stats_file_path = pathlib.Path(path)
         stats_df.to_csv(stats_file_path, index=False)
+    
+    def clear_data(self):
+        self.error_list.clear()
+        self.graph_stats.clear()
 
 def config_args_parser():
     new_arg_parser = argparse.ArgumentParser()
-    new_arg_parser.add_argument("--n_places", type=int, required=True,
-                        help="The max number of places to download")
+
+    new_arg_parser.add_argument("--n_threads", type=int,
+                        help="The max number of threads to use on download", default=None)
+    
+    new_arg_parser.add_argument("--start_idx", type=int,
+                        help="The starting index of city to download.", default=0)
+    
+    new_arg_parser.add_argument("--end_idx", type=int,
+                        help="The end index of city to download.", default=15)
+    
+    new_arg_parser.add_argument("--verbose", type=bool,
+                        help="If it is to print when download of a city is finished.", default=True)
+    
+    new_arg_parser.add_argument("--print_every", type=int,
+                        help="Print after every num of cities has been downloaded", default=5)
+    
+    new_arg_parser.add_argument("--save_after_every", type=int,
+                        help="Save stats and error file after have tried to download every num of cities",
+                        default=5)
                         
     return new_arg_parser
 
         
 if __name__ == "__main__":
+    ox.settings.use_cache = False
     arg_parser = config_args_parser()
     user_args = arg_parser.parse_args()
 
     places_df = pd.read_csv('data/final_strings.csv')['0']
-    target_places = list(places_df.items())[:user_args.n_places]
-
+    target_places = list(places_df.items())[user_args.start_idx:user_args.end_idx]
+    
     graphs_folder_path = "C:\\Users\\User\\Documents\\UFMG\\POC1\\graphs"
+    
     gd = GraphSaver(graphs_folder_path)
-    gd.download_graph_from_places(target_places, print_every=5)
 
-    gd.save_error_list_to_file("error_list.csv")
+    start = timer()
+    for i in range(0, len(target_places), user_args.save_after_every):
+        places = target_places[i:i+user_args.save_after_every]
+        gd.download_graph_from_places(places, verbose=user_args.verbose, print_every=user_args.print_every, n_threads=user_args.n_threads)
+        gd.save_error_list_to_file(f"error_list{int(time.time())}.csv")
+        gd.save_stats_to_file(f"stats{int(time.time())}.csv")
 
-    gd.save_stats_to_file("stats.csv")
+        gd.clear_data()
+    end = timer()
+    print(f"Time elapsed: {end-start}")
