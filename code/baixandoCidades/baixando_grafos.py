@@ -22,6 +22,8 @@ class GraphSaver():
         
         self._download_counter_lock = threading.Lock()
         self._download_counter = 0
+
+        self._print_lock = threading.Lock()
     
     def download_graph_from_places(self, places_names_and_ids:list, n_threads:int = None, verbose:bool = True, print_every:int = 10):
         self.error_list.clear()
@@ -29,24 +31,36 @@ class GraphSaver():
             [executor.submit(self._download_and_save_graph_from_place, place_id, place_name, verbose, print_every) for place_id, place_name in places_names_and_ids]
     
     def _download_and_save_graph_from_place(self, place_id:int, place_name:str, verbose:bool, print_every:int):
-            
+        should_print = False
+        if verbose:
+            with self._download_counter_lock:
+                if self._download_counter % print_every == 0:
+                    should_print = True
+                self._download_counter += 1
+
+        if should_print:
+            with self._print_lock:
+                print(f"Começando ({place_id}, {place_name})")
+
+
         try:
             cf = '["highway"~"primary|secondary|tertiary|residential"]'
             G = ox.graph_from_place(place_name, network_type="drive", custom_filter=cf)
         except:
             with self._error_lock:
-                self.error_list.append((place_id, place_name))    
+                self.error_list.append((place_id, place_name))
+                if should_print:
+                    with self._print_lock:
+                        print(f"Deu ERRO ({place_id}, {place_name})")
             return
         
         graph_file = self.graph_folder / f'{place_id}.graphml'
         ox.io.save_graphml(G, graph_file)
 
-        if verbose:
-            with self._download_counter_lock:
-                if self._download_counter % print_every == 0:
-                    print(f"Terminou ({place_id}, {place_name})")
+        if should_print:
+            with self._print_lock:
+                print(f"Terminou ({place_id}, {place_name})")
 
-                self._download_counter += 1
 
         n_nodes = len(G.nodes)
         n_edges = len(G.edges)
@@ -133,6 +147,7 @@ if __name__ == "__main__":
     target_places = list(places_df.items())[user_args.start_idx:user_args.end_idx]
     
     graphs_folder_path = "C:\\Users\\User\\Documents\\UFMG\\POC1\\graphs"
+    data_path = "data/"
     
     gd = GraphSaver(graphs_folder_path)
 
@@ -140,8 +155,8 @@ if __name__ == "__main__":
     for i in range(0, len(target_places), user_args.save_after_every):
         places = target_places[i:i+user_args.save_after_every]
         gd.download_graph_from_places(places, verbose=user_args.verbose, print_every=user_args.print_every, n_threads=user_args.n_threads)
-        gd.save_error_list_to_file(f"error_list{int(time.time())}.csv")
-        gd.save_stats_to_file(f"stats{int(time.time())}.csv")
+        gd.save_error_list_to_file(f"{data_path}error_list{int(time.time())}.csv")
+        gd.save_stats_to_file(f"{data_path}stats{int(time.time())}.csv")
 
         gd.clear_data()
     end = timer()
