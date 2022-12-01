@@ -1,0 +1,40 @@
+indicator,type,description
+country,string,Main country name
+country_iso,string,Main country ISO 3166-1 alpha-3 code
+core_city,string,Urban center core city name
+uc_id,int,Urban center unique ID
+cc_avg_dir,float,Average clustering coefficient (directed)
+cc_avg_undir,float,Average clustering coefficient (undirected)
+cc_wt_avg_dir,float,Average clustering coefficient (weighted/directed)
+cc_wt_avg_undir,float,Average clustering coefficient (weighted/undirected)
+circuity,float,Ratio of street lengths to straightline distances
+elev_iqr,float,"Interquartile range of node elevations, meters"
+elev_mean,float,"Mean node elevation, meters"
+elev_median,float,"Median node elevation, meters"
+elev_range,float,"Range of node elevations, meters"
+elev_std,float,"Standard deviation of node elevations, meter"
+grade_mean,float,Mean absolute street grade (incline)
+grade_median,float,Median absolute street grade (incline)
+intersect_count,int,Count of (undirected) edge intersections
+intersect_count_clean,int,"Count of street intersections (after merging nodes within 10 meters geometrically)"
+intersect_count_clean_topo,int,"Count of street intersections (after merging nodes within 10 meters topologically)"
+k_avg,float,Average node degree (undirected)
+length_mean,float,"Mean street segment length (undirected edges), meters"
+length_median,float,"Median street segment length (undirected edges), meters"
+length_total,float,"Total street length (undirected edges), meters"
+node_count,int,Count of nodes
+orientation_entropy,float,Entropy of street network bearings
+orientation_order,float,Orientation order of street network bearings
+pagerank_max,float,The maximum PageRank value of any node
+prop_4way,float,Proportion of nodes that represent 4-way street intersections
+prop_3way,float,Proportion of nodes that represent 3-way street intersections
+prop_deadend,float,Proportion of nodes that represent dead-ends
+self_loop_proportion,float,Proportion of edges that are self-loops
+straightness,float,1 / circuity
+street_segment_count,int,Count of streets (undirected edges)
+uc_names,string,List of city names within this urban center (GISCO)
+world_region,string,Major geographical region (UN WUP)
+world_subregion,string,Minor geographical region (UN WUP)
+resident_pop,int,Total resident population in 2015 (GHS)
+area,float,"Area within urban center boundary polygon, km2 (GHS)"
+built_up_area,float,"Built-up surface area in 2015, km2 (GHS)"
