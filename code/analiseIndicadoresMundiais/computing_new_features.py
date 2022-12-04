@@ -1,8 +1,9 @@
 import pandas as pd
 import osmnx as ox
-import networkx
+import networkx as nx
 import pathlib
 import multiprocessing
+import warnings
 
 def complete_with_basic_info(graph_path:pathlib.Path, features:dict) -> dict:
     city_name, city_id = get_name_and_id(graph_path)
@@ -60,6 +61,34 @@ def merge_all_features(features_dict_list:list) -> dict:
     
     return full_features
 
+def compute_networkx_features(G) -> dict:
+    features = dict()
+    undirected_graph = nx.Graph(G)
+    greatest_undirected_component_nodes = max(nx.connected_components(undirected_graph), key=len)
+    # greatest_directed_component_graph = G.subgraph(greatest_undirected_component_nodes)
+    greatest_undirected_component_graph = undirected_graph.subgraph(greatest_undirected_component_nodes)
+
+    #Too expensive to compute
+    # features['node_conectivity'] = len(nx.minimum_node_cut(greatest_component))
+    # features['edge_conectivity'] = len(nx.minimum_edge_cut(greatest_component))
+    # features['avg_conectivity'] = nx.average_node_connectivity(undirected_graph)
+    
+    betweenness_cent:dict = nx.betweenness_centrality(G)
+    features['max_betweenness_centrality'] = max(list(betweenness_cent.values()))
+    features['avg_betweenness_centrality'] = features['max_betweenness_centrality']/len(betweenness_cent)
+    
+    features['global_efficiency'] = nx.global_efficiency(undirected_graph)
+
+    information_cent = nx.information_centrality(greatest_undirected_component_graph)
+    features['max_info_centrality'] = max(list(information_cent.values()))
+    features['avg_info_centrality'] = features['max_info_centrality']/len(information_cent)
+
+    #This method already treats for multiple components.
+    #See it's documentation for the Wasserman and Faust version
+    closeness_cent = nx.closeness_centrality(G)
+    features['avg_closeness_centrality'] = max(list(closeness_cent.values()))/len(closeness_cent)
+    return features
+
 def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
     full_features = dict()
     full_features = complete_with_basic_info(graph_path, full_features)
@@ -70,8 +99,9 @@ def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dic
         #Para isso, devo ler também o arquivo de features já existentes.
         osmnx_features = compute_osmnx_features(G, full_features['city_id'], indicators_df)
         other_calculated_features = compute_other_features(osmnx_features)
+        networkx_features = compute_networkx_features(G)
 
-        all_features_list = [full_features, osmnx_features, other_calculated_features]
+        all_features_list = [full_features, osmnx_features, other_calculated_features, networkx_features]
         full_features = merge_all_features(all_features_list)
     except Exception as e:
         print(f"ERRO: {full_features['city_name']}.\n{e}")
@@ -133,4 +163,6 @@ def check_valid_folder(graph_folder_path):
         exit(-1)
 
 if __name__ == "__main__":
+    #So to ignore networkx warnings
+    warnings.filterwarnings("ignore")
     main()
