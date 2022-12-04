@@ -7,7 +7,7 @@ import multiprocessing
 def complete_with_basic_info(graph_path:pathlib.Path, features:dict) -> dict:
     city_name, city_id = get_name_and_id(graph_path)
     features['city_name'] = city_name
-    features['city_id'] = city_id
+    features['city_id'] = int(city_id)
     return features
 
 def get_name_and_id(graph_path:pathlib.Path):
@@ -17,9 +17,23 @@ def get_name_and_id(graph_path:pathlib.Path):
     city_id = file_name_parts[1]
     return city_name, city_id
 
-def compute_osmnx_features(G) -> dict:
+def get_indicators_df():
+    indicators_from_paper_path = pathlib.Path('./data/indicators.csv')
+    if not indicators_from_paper_path.exists():
+        print(f"{indicators_from_paper_path} does not exists!")
+        exit(-1)
+    
+    indicators_df = pd.read_csv(indicators_from_paper_path)
+    return indicators_df
+
+def get_graphml_files(graph_folder_path) -> list:
+    return list(graph_folder_path.glob('*.graphml'))[:3]
+
+def compute_osmnx_features(G, city_id:str, indicators_df:pd.DataFrame) -> dict:
     #https://github.com/gboeing/osmnx-examples/blob/main/notebooks/06-stats-indicators-centrality.ipynb
-    stats = ox.basic_stats(G)
+    city_build_square_km_area = float(indicators_df[indicators_df['uc_id'] == city_id]['built_up_area'].values[0])
+    city_build_square_m_area = city_build_square_km_area * 1_000_000
+    stats = ox.basic_stats(G, area=city_build_square_m_area)
 
     for k, count in stats["streets_per_node_counts"].items():
         stats["{}way_int_count".format(k)] = count
@@ -31,6 +45,39 @@ def compute_osmnx_features(G) -> dict:
     del stats["streets_per_node_counts"]
     del stats["streets_per_node_proportions"]
     return stats
+
+def compute_other_features(features:dict) -> dict:
+    other_features = dict()
+    other_features['nodes_per_km_street'] = features['n'] / features['street_length_total']
+    other_features['organic_prop'] = (features['1way_int_count']+features['3way_int_count'])/(features['n']-features['2way_int_count'])
+    other_features['meshedness_coefficient'] = (features['m']-features['n']+1)/((2*features['n']*(1-features['2way_int_prop']))-5)
+    return other_features
+
+def merge_all_features(features_dict_list:list) -> dict:
+    full_features = features_dict_list[0]
+    for features in features_dict_list[1:]:
+        full_features = {**full_features, **features}
+    
+    return full_features
+
+def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
+    full_features = dict()
+    full_features = complete_with_basic_info(graph_path, full_features)
+    try:
+        G = ox.load_graphml(graph_path)
+
+        #Falta conseguir a área em metros quadrados para computar algumas outras features
+        #Para isso, devo ler também o arquivo de features já existentes.
+        osmnx_features = compute_osmnx_features(G, full_features['city_id'], indicators_df)
+        other_calculated_features = compute_other_features(osmnx_features)
+
+        all_features_list = [full_features, osmnx_features, other_calculated_features]
+        full_features = merge_all_features(all_features_list)
+    except Exception as e:
+        print(f"ERRO: {full_features['city_name']}.\n{e}")
+    else:
+        print(f"Completou {full_features['city_name']}")
+        return full_features
 
 def remove_features_already_computed(full_features:dict):
     unwanted_features = [
@@ -48,27 +95,35 @@ def remove_features_already_computed(full_features:dict):
     
     return full_features
 
-def compute_features(graph_path:pathlib.Path) -> dict:
-    full_features = dict()
-    full_features = complete_with_basic_info(graph_path, full_features)
-    try:
-        G = ox.load_graphml(graph_path)
+def clean_features(features):
+    cleaned_features = list()
+    for feature in features:
+        cleaned_features.append(remove_features_already_computed(feature))
+    
+    return cleaned_features
 
-        #Falta conseguir a área em metros quadrados para computar algumas outras features
-        #Para isso, devo ler também o arquivo de features já existentes.
-        osmnx_features = compute_osmnx_features(G)
+def save_features_df(features_df):
+    new_features_folder_path = pathlib.Path('./new_features')
+    new_features_folder_path.mkdir(exist_ok=True)
 
-        full_features = {**full_features, **osmnx_features}
-        full_features = remove_features_already_computed(full_features)
-    except Exception as e:
-        print(f"ERRO: {full_features['city_name']}.\n{e}")
-    else:
-        print(f"Completou {full_features['city_name']}")
-        return full_features
+    features_df.to_csv(new_features_folder_path / 'new_features.csv', index=False)
 
 def main():
     graph_folder_path = pathlib.Path('C:\\Users\\User\\Documents\\UFMG\\POC1\\world_graphs\\')
+    check_valid_folder(graph_folder_path)
+    
+    indicators_df = get_indicators_df()
+    graph_files = get_graphml_files(graph_folder_path)
+    
+    features = [compute_features(graph_path, indicators_df) for graph_path in graph_files]
+    features = clean_features(features)
 
+    features_df = pd.DataFrame.from_records(features)
+    features_df.fillna(0, inplace=True)
+
+    save_features_df(features_df)
+
+def check_valid_folder(graph_folder_path):
     if not graph_folder_path.exists():
         print(f'{graph_folder_path} does not exists!')
         exit(-1)
@@ -76,19 +131,6 @@ def main():
     if not graph_folder_path.is_dir():
         print(f"{graph_folder_path} is not a folder!")
         exit(-1)
-    
-    graph_files = list(graph_folder_path.glob('*.graphml'))[:3]
-
-    features = [compute_features(graph_path) for graph_path in graph_files]
-
-    features_df = pd.DataFrame.from_records(features)
-    features_df.fillna(0, inplace=True)
-
-    new_features_folder_path = pathlib.Path('./new_features')
-
-    new_features_folder_path.mkdir(exist_ok=True)
-
-    features_df.to_csv(new_features_folder_path / 'new_features.csv', index=False)
 
 if __name__ == "__main__":
     main()
