@@ -7,6 +7,77 @@ import multiprocessing
 import warnings
 from timeit import default_timer as timer
 
+GRAPH_TYPES = {'small':1, 'big':2}
+
+def get_num_processes_used(TARGET_GRAPH_TYPE):
+    if TARGET_GRAPH_TYPE == GRAPH_TYPES['small']:
+        processes = multiprocessing.cpu_count() // 2
+    elif TARGET_GRAPH_TYPE == GRAPH_TYPES['big']:
+        processes = 1
+    return processes
+
+def get_graphml_file_paths(graph_type:int) -> list:
+    graph_folder_path = pathlib.Path('C:\\Users\\User\\Documents\\UFMG\\POC1\\world_graphs\\')
+    check_valid_folder(graph_folder_path)
+
+    big_graphs_cities_names = get_big_graphs_cities_names()
+    all_graph_files = graph_folder_path.glob('*.graphml')
+
+    target_graph_files = list()
+
+    if graph_type == GRAPH_TYPES['small']:
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] not in big_graphs_cities_names]
+    elif graph_type == GRAPH_TYPES['big']:
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in big_graphs_cities_names]
+    
+    return target_graph_files[:3]
+
+def check_valid_folder(graph_folder_path):
+    if not graph_folder_path.exists():
+        print(f'{graph_folder_path} does not exists!')
+        exit(-1)
+    
+    if not graph_folder_path.is_dir():
+        print(f"{graph_folder_path} is not a folder!")
+        exit(-1)
+
+def get_big_graphs_cities_names() -> set:
+    big_graphs_indicators_path = pathlib.Path("./data/grafos_grandes.csv")
+    big_graphs_df = pd.read_csv(big_graphs_indicators_path)
+    big_graphs_cities_names = set(big_graphs_df['core_city'].values)
+    return big_graphs_cities_names
+
+def get_indicators_df():
+    indicators_from_paper_path = pathlib.Path('./data/indicators.csv')
+    if not indicators_from_paper_path.exists():
+        print(f"{indicators_from_paper_path} does not exists!")
+        exit(-1)
+    
+    indicators_df = pd.read_csv(indicators_from_paper_path)
+    return indicators_df
+
+def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
+    #So to ignore networkx warnings
+    warnings.filterwarnings("ignore")
+    full_features = dict()
+    full_features = complete_with_basic_info(graph_path, full_features)
+    try:
+        G = ox.load_graphml(graph_path)
+
+        #Falta conseguir a área em metros quadrados para computar algumas outras features
+        #Para isso, devo ler também o arquivo de features já existentes.
+        osmnx_features = compute_osmnx_features(G, full_features['city_id'], indicators_df)
+        other_calculated_features = compute_other_features(osmnx_features)
+        networkx_features = compute_networkx_features(G)
+
+        all_features_list = [full_features, osmnx_features, other_calculated_features, networkx_features]
+        full_features = merge_all_features(all_features_list)
+    except Exception as e:
+        print(f"ERRO: {full_features['city_name']}.\n{e}")
+    else:
+        print(f"Completou {full_features['city_name']}")
+        return full_features
+
 def complete_with_basic_info(graph_path:pathlib.Path, features:dict) -> dict:
     city_name, city_id = get_name_and_id(graph_path)
     features['city_name'] = city_name
@@ -19,18 +90,6 @@ def get_name_and_id(graph_path:pathlib.Path):
     city_name = " ".join(file_name_parts[0].split('_'))
     city_id = file_name_parts[1]
     return city_name, city_id
-
-def get_indicators_df():
-    indicators_from_paper_path = pathlib.Path('./data/indicators.csv')
-    if not indicators_from_paper_path.exists():
-        print(f"{indicators_from_paper_path} does not exists!")
-        exit(-1)
-    
-    indicators_df = pd.read_csv(indicators_from_paper_path)
-    return indicators_df
-
-def get_graphml_files(graph_folder_path) -> list:
-    return list(graph_folder_path.glob('*.graphml'))[:]
 
 def compute_osmnx_features(G, city_id:str, indicators_df:pd.DataFrame) -> dict:
     #https://github.com/gboeing/osmnx-examples/blob/main/notebooks/06-stats-indicators-centrality.ipynb
@@ -55,13 +114,6 @@ def compute_other_features(features:dict) -> dict:
     other_features['organic_prop'] = (features['1way_int_count']+features['3way_int_count'])/(features['n']-features['2way_int_count'])
     other_features['meshedness_coefficient'] = (features['m']-features['n']+1)/((2*features['n']*(1-features['2way_int_prop']))-5)
     return other_features
-
-def merge_all_features(features_dict_list:list) -> dict:
-    full_features = features_dict_list[0]
-    for features in features_dict_list[1:]:
-        full_features = {**full_features, **features}
-    
-    return full_features
 
 def compute_networkx_features(G) -> dict:
     features = dict()
@@ -90,35 +142,25 @@ def compute_networkx_features(G) -> dict:
     
     features['global_efficiency'] = nx.global_efficiency(undirected_graph)
 
-    
-
     #This method already treats for multiple components.
     #See it's documentation for the Wasserman and Faust version
     closeness_cent = nx.closeness_centrality(G)
     features['avg_closeness_centrality'] = max(list(closeness_cent.values()))/len(closeness_cent)
     return features
 
-def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
-    #So to ignore networkx warnings
-    warnings.filterwarnings("ignore")
-    full_features = dict()
-    full_features = complete_with_basic_info(graph_path, full_features)
-    try:
-        G = ox.load_graphml(graph_path)
+def merge_all_features(features_dict_list:list) -> dict:
+    full_features = features_dict_list[0]
+    for features in features_dict_list[1:]:
+        full_features = {**full_features, **features}
+    
+    return full_features
 
-        #Falta conseguir a área em metros quadrados para computar algumas outras features
-        #Para isso, devo ler também o arquivo de features já existentes.
-        osmnx_features = compute_osmnx_features(G, full_features['city_id'], indicators_df)
-        other_calculated_features = compute_other_features(osmnx_features)
-        networkx_features = compute_networkx_features(G)
-
-        all_features_list = [full_features, osmnx_features, other_calculated_features, networkx_features]
-        full_features = merge_all_features(all_features_list)
-    except Exception as e:
-        print(f"ERRO: {full_features['city_name']}.\n{e}")
-    else:
-        print(f"Completou {full_features['city_name']}")
-        return full_features
+def clean_features(features):
+    cleaned_features = list()
+    for feature in features:
+        cleaned_features.append(remove_features_already_computed(feature))
+    
+    return cleaned_features
 
 def remove_features_already_computed(full_features:dict):
     unwanted_features = [
@@ -136,28 +178,30 @@ def remove_features_already_computed(full_features:dict):
     
     return full_features
 
-def clean_features(features):
-    cleaned_features = list()
-    for feature in features:
-        cleaned_features.append(remove_features_already_computed(feature))
-    
-    return cleaned_features
+def save_features(features:list, graph_type:int):
 
-def save_features_df(features_df):
+    features_df = pd.DataFrame.from_records(features)
+    features_df.fillna(0, inplace=True)
     new_features_folder_path = pathlib.Path('./new_features')
     new_features_folder_path.mkdir(exist_ok=True)
 
-    features_df.to_csv(new_features_folder_path / 'new_features.csv', index=False)
+    if graph_type == GRAPH_TYPES['small']:
+        file_name = 'small_graphs.csv'
+    elif graph_type == GRAPH_TYPES['big']:
+        file_name = "big_graphs.csv"
+
+    features_df.to_csv(new_features_folder_path / file_name, index=False)
 
 def main():
-    graph_folder_path = pathlib.Path('C:\\Users\\User\\Documents\\UFMG\\POC1\\world_graphs\\')
-    check_valid_folder(graph_folder_path)
+    TARGET_GRAPH_TYPE = GRAPH_TYPES['big']
+    print(f"GRAPH TARGET TYPE: {TARGET_GRAPH_TYPE}")
     
-    indicators_df = get_indicators_df()
-    graph_files = get_graphml_files(graph_folder_path)
-    
-    PROCESSES = multiprocessing.cpu_count() // 2
+    PROCESSES = get_num_processes_used(TARGET_GRAPH_TYPE)
     print(f'PROCESSES USED: {PROCESSES}')
+
+    graph_files = get_graphml_file_paths(TARGET_GRAPH_TYPE)
+    indicators_df = get_indicators_df()
+
     time_start = timer()
     with multiprocessing.Pool(PROCESSES) as pool:
         params = [(graph_path, indicators_df) for graph_path in graph_files]
@@ -166,20 +210,7 @@ def main():
     print(f"Finished in {time_end - time_start} seconds")
         
     features = clean_features(features)
-
-    features_df = pd.DataFrame.from_records(features)
-    features_df.fillna(0, inplace=True)
-
-    save_features_df(features_df)
-
-def check_valid_folder(graph_folder_path):
-    if not graph_folder_path.exists():
-        print(f'{graph_folder_path} does not exists!')
-        exit(-1)
-    
-    if not graph_folder_path.is_dir():
-        print(f"{graph_folder_path} is not a folder!")
-        exit(-1)
+    save_features(features, TARGET_GRAPH_TYPE)
 
 if __name__ == "__main__":
     main()
