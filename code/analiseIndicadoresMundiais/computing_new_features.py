@@ -3,7 +3,9 @@ import osmnx as ox
 import networkx as nx
 import pathlib
 import multiprocessing
+# from concurrent.futures import ProcessPoolExecutor
 import warnings
+from timeit import default_timer as timer
 
 def complete_with_basic_info(graph_path:pathlib.Path, features:dict) -> dict:
     city_name, city_id = get_name_and_id(graph_path)
@@ -28,7 +30,7 @@ def get_indicators_df():
     return indicators_df
 
 def get_graphml_files(graph_folder_path) -> list:
-    return list(graph_folder_path.glob('*.graphml'))[:3]
+    return list(graph_folder_path.glob('*.graphml'))[:]
 
 def compute_osmnx_features(G, city_id:str, indicators_df:pd.DataFrame) -> dict:
     #https://github.com/gboeing/osmnx-examples/blob/main/notebooks/06-stats-indicators-centrality.ipynb
@@ -67,6 +69,15 @@ def compute_networkx_features(G) -> dict:
     greatest_undirected_component_nodes = max(nx.connected_components(undirected_graph), key=len)
     # greatest_directed_component_graph = G.subgraph(greatest_undirected_component_nodes)
     greatest_undirected_component_graph = undirected_graph.subgraph(greatest_undirected_component_nodes)
+    #So to free memory
+    greatest_undirected_component_nodes = None
+
+    information_cent = nx.information_centrality(greatest_undirected_component_graph)
+    features['max_info_centrality'] = max(list(information_cent.values()))
+    features['avg_info_centrality'] = features['max_info_centrality']/len(information_cent)
+
+    #So to free memory
+    greatest_undirected_component_graph = None
 
     #Too expensive to compute
     # features['node_conectivity'] = len(nx.minimum_node_cut(greatest_component))
@@ -79,9 +90,7 @@ def compute_networkx_features(G) -> dict:
     
     features['global_efficiency'] = nx.global_efficiency(undirected_graph)
 
-    information_cent = nx.information_centrality(greatest_undirected_component_graph)
-    features['max_info_centrality'] = max(list(information_cent.values()))
-    features['avg_info_centrality'] = features['max_info_centrality']/len(information_cent)
+    
 
     #This method already treats for multiple components.
     #See it's documentation for the Wasserman and Faust version
@@ -90,6 +99,8 @@ def compute_networkx_features(G) -> dict:
     return features
 
 def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
+    #So to ignore networkx warnings
+    warnings.filterwarnings("ignore")
     full_features = dict()
     full_features = complete_with_basic_info(graph_path, full_features)
     try:
@@ -145,7 +156,15 @@ def main():
     indicators_df = get_indicators_df()
     graph_files = get_graphml_files(graph_folder_path)
     
-    features = [compute_features(graph_path, indicators_df) for graph_path in graph_files]
+    PROCESSES = multiprocessing.cpu_count() // 2
+    print(f'PROCESSES USED: {PROCESSES}')
+    time_start = timer()
+    with multiprocessing.Pool(PROCESSES) as pool:
+        params = [(graph_path, indicators_df) for graph_path in graph_files]
+        features = pool.starmap(compute_features, params, chunksize=1)
+    time_end = timer()
+    print(f"Finished in {time_end - time_start} seconds")
+        
     features = clean_features(features)
 
     features_df = pd.DataFrame.from_records(features)
@@ -163,6 +182,4 @@ def check_valid_folder(graph_folder_path):
         exit(-1)
 
 if __name__ == "__main__":
-    #So to ignore networkx warnings
-    warnings.filterwarnings("ignore")
     main()
