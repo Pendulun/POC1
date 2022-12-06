@@ -11,7 +11,7 @@ GRAPH_TYPES = {'small':1, 'big':2}
 
 def get_num_processes_used(TARGET_GRAPH_TYPE):
     if TARGET_GRAPH_TYPE == GRAPH_TYPES['small']:
-        processes = multiprocessing.cpu_count() // 2
+        processes = (multiprocessing.cpu_count() // 2) + 1
     elif TARGET_GRAPH_TYPE == GRAPH_TYPES['big']:
         processes = 1
     return processes
@@ -30,7 +30,7 @@ def get_graphml_file_paths(graph_type:int) -> list:
     elif graph_type == GRAPH_TYPES['big']:
         target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in big_graphs_cities_names]
     
-    return target_graph_files[:3]
+    return target_graph_files
 
 def check_valid_folder(graph_folder_path):
     if not graph_folder_path.exists():
@@ -55,6 +55,12 @@ def get_indicators_df():
     
     indicators_df = pd.read_csv(indicators_from_paper_path)
     return indicators_df
+
+def get_save_step(graph_type:int):
+    if graph_type == GRAPH_TYPES['small']:
+        return 20
+    elif graph_type == GRAPH_TYPES['big']:
+        return 20
 
 def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
     #So to ignore networkx warnings
@@ -178,7 +184,7 @@ def remove_features_already_computed(full_features:dict):
     
     return full_features
 
-def save_features(features:list, graph_type:int):
+def save_features(features:list, graph_type:int, batch_count:int):
 
     features_df = pd.DataFrame.from_records(features)
     features_df.fillna(0, inplace=True)
@@ -186,31 +192,56 @@ def save_features(features:list, graph_type:int):
     new_features_folder_path.mkdir(exist_ok=True)
 
     if graph_type == GRAPH_TYPES['small']:
-        file_name = 'small_graphs.csv'
+        file_name = f'small_graphs_{batch_count}.csv'
     elif graph_type == GRAPH_TYPES['big']:
-        file_name = "big_graphs.csv"
+        file_name = f"big_graphs_{batch_count}.csv"
 
     features_df.to_csv(new_features_folder_path / file_name, index=False)
 
 def main():
-    TARGET_GRAPH_TYPE = GRAPH_TYPES['big']
+    TARGET_GRAPH_TYPE = GRAPH_TYPES['small']
     print(f"GRAPH TARGET TYPE: {TARGET_GRAPH_TYPE}")
     
     PROCESSES = get_num_processes_used(TARGET_GRAPH_TYPE)
     print(f'PROCESSES USED: {PROCESSES}')
 
+    CHUNKSIZE = 1
+    print(f'CHUNKSIZE USED: {CHUNKSIZE}')
+
     graph_files = get_graphml_file_paths(TARGET_GRAPH_TYPE)
     indicators_df = get_indicators_df()
 
-    time_start = timer()
-    with multiprocessing.Pool(PROCESSES) as pool:
-        params = [(graph_path, indicators_df) for graph_path in graph_files]
-        features = pool.starmap(compute_features, params, chunksize=1)
-    time_end = timer()
-    print(f"Finished in {time_end - time_start} seconds")
-        
-    features = clean_features(features)
-    save_features(features, TARGET_GRAPH_TYPE)
+    min_batch_size = get_save_step(TARGET_GRAPH_TYPE)
+    print(f"BATCH MIN SIZE: {min_batch_size}")
+    STARTING_BATCH_ID = 10
+    print(f"STARTING BATCH: {STARTING_BATCH_ID}")
+    starting_batch_idx = STARTING_BATCH_ID*min_batch_size
+    NUM_BATCHES_TO_RUN = 8
+    print(f"NUM BATCHES TO RUN: {NUM_BATCHES_TO_RUN}")
+    curr_batch_id = STARTING_BATCH_ID
+    num_batch = 0
+    elapsed_time_per_batch = list()
+    while starting_batch_idx < len(graph_files) and num_batch < NUM_BATCHES_TO_RUN:
+        graph_path_batch = graph_files[starting_batch_idx: starting_batch_idx+min_batch_size]
+        try:
+            print(f"Começando batch {curr_batch_id}")
+            time_start = timer()
+            with multiprocessing.Pool(PROCESSES) as pool:
+                params = [(graph_path, indicators_df) for graph_path in graph_path_batch]
+                features = pool.starmap(compute_features, params, chunksize=CHUNKSIZE)
+            time_end = timer()
+            elapsed_time_per_batch.append(time_end - time_start)
+        except Exception as e:
+            print(f"Error on batch {curr_batch_id}!\n {e}")
+        else:
+            features = clean_features(features)
+            save_features(features, TARGET_GRAPH_TYPE, curr_batch_id)
+        finally:
+            starting_batch_idx += min_batch_size
+            curr_batch_id += 1
+            num_batch += 1
 
+    print(f"Mean batch computing time: {sum(elapsed_time_per_batch)/len(elapsed_time_per_batch)} seconds")
+    print(f"Batches times: {elapsed_time_per_batch}")
 if __name__ == "__main__":
     main()
