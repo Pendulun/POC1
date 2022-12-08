@@ -7,12 +7,14 @@ import multiprocessing
 import warnings
 from timeit import default_timer as timer
 
-GRAPH_TYPES = {'small':1, 'big':2}
+GRAPH_TYPES = {'small':1, 'big':2, 'target':3}
 
 def get_num_processes_used(TARGET_GRAPH_TYPE):
     if TARGET_GRAPH_TYPE == GRAPH_TYPES['small']:
         processes = (multiprocessing.cpu_count() // 2) + 1
     elif TARGET_GRAPH_TYPE == GRAPH_TYPES['big']:
+        processes = 1
+    elif TARGET_GRAPH_TYPE == GRAPH_TYPES['target']:
         processes = 1
     return processes
 
@@ -29,6 +31,16 @@ def get_graphml_file_paths(graph_type:int) -> list:
         target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] not in big_graphs_cities_names]
     elif graph_type == GRAPH_TYPES['big']:
         target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in big_graphs_cities_names]
+    elif graph_type == GRAPH_TYPES['target']:
+        target_cities = [
+            'abuja', 'barcelona', 'birmingham', 'columbus',
+            'cordoba', 'dar_es_salaam', 'guadalajara', 'hyderabad',
+            'kochi', 'leon', 'london', 'los angeles',
+            'manchester', 'merida', 'naples', 'portland',
+            'san antonio', 'san jose', 'santiago', 'suzhou',
+            'tripoli', 'valencia'
+        ]
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in target_cities]
     
     return target_graph_files
 
@@ -61,6 +73,8 @@ def get_save_step(graph_type:int):
         return 20
     elif graph_type == GRAPH_TYPES['big']:
         return 20
+    elif graph_type == GRAPH_TYPES['target']:
+        return 100
 
 def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dict:
     #So to ignore networkx warnings
@@ -122,6 +136,7 @@ def compute_other_features(features:dict) -> dict:
     return other_features
 
 def compute_networkx_features(G) -> dict:
+    return dict()
     features = dict()
     undirected_graph = nx.Graph(G)
     greatest_undirected_component_nodes = max(nx.connected_components(undirected_graph), key=len)
@@ -195,11 +210,13 @@ def save_features(features:list, graph_type:int, batch_count:int):
         file_name = f'small_graphs_{batch_count}.csv'
     elif graph_type == GRAPH_TYPES['big']:
         file_name = f"big_graphs_{batch_count}.csv"
+    elif graph_type == GRAPH_TYPES['target']:
+        file_name = f"target_graphs_{batch_count}.csv"
 
     features_df.to_csv(new_features_folder_path / file_name, index=False)
 
 def main():
-    TARGET_GRAPH_TYPE = GRAPH_TYPES['small']
+    TARGET_GRAPH_TYPE = GRAPH_TYPES['target']
     print(f"GRAPH TARGET TYPE: {TARGET_GRAPH_TYPE}")
     
     PROCESSES = get_num_processes_used(TARGET_GRAPH_TYPE)
@@ -213,11 +230,12 @@ def main():
 
     min_batch_size = get_save_step(TARGET_GRAPH_TYPE)
     print(f"BATCH MIN SIZE: {min_batch_size}")
-    STARTING_BATCH_ID = 10
+    STARTING_BATCH_ID = 0
     print(f"STARTING BATCH: {STARTING_BATCH_ID}")
     starting_batch_idx = STARTING_BATCH_ID*min_batch_size
-    NUM_BATCHES_TO_RUN = 8
+    NUM_BATCHES_TO_RUN = 1
     print(f"NUM BATCHES TO RUN: {NUM_BATCHES_TO_RUN}")
+
     curr_batch_id = STARTING_BATCH_ID
     num_batch = 0
     elapsed_time_per_batch = list()
@@ -241,7 +259,10 @@ def main():
             curr_batch_id += 1
             num_batch += 1
 
-    print(f"Mean batch computing time: {sum(elapsed_time_per_batch)/len(elapsed_time_per_batch)} seconds")
-    print(f"Batches times: {elapsed_time_per_batch}")
+    if len(elapsed_time_per_batch) > 0:
+        print(f"Mean batch computing time: {sum(elapsed_time_per_batch)/len(elapsed_time_per_batch)} seconds")
+        print(f"Batches times: {elapsed_time_per_batch}")
+    else:
+        print("No times for batches!")
 if __name__ == "__main__":
     main()
