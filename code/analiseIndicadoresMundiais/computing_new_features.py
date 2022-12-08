@@ -22,25 +22,21 @@ def get_graphml_file_paths(graph_type:int) -> list:
     graph_folder_path = pathlib.Path('C:\\Users\\User\\Documents\\UFMG\\POC1\\world_graphs\\')
     check_valid_folder(graph_folder_path)
 
-    big_graphs_cities_names = get_big_graphs_cities_names()
+    
     all_graph_files = graph_folder_path.glob('*.graphml')
 
     target_graph_files = list()
 
+    big_graphs_cities_ids = get_big_graphs_cities_ids()
     if graph_type == GRAPH_TYPES['small']:
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] not in big_graphs_cities_names]
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] not in big_graphs_cities_ids]
     elif graph_type == GRAPH_TYPES['big']:
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in big_graphs_cities_names]
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] in big_graphs_cities_ids]
     elif graph_type == GRAPH_TYPES['target']:
         target_cities = [
-            'abuja', 'barcelona', 'birmingham', 'columbus',
-            'cordoba', 'dar_es_salaam', 'guadalajara', 'hyderabad',
-            'kochi', 'leon', 'london', 'los angeles',
-            'manchester', 'merida', 'naples', 'portland',
-            'san antonio', 'san jose', 'santiago', 'suzhou',
-            'tripoli', 'valencia'
+            '906', '952', '12812', '12879'
         ]
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[0] in target_cities]
+        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] in target_cities]
     
     return target_graph_files
 
@@ -53,11 +49,11 @@ def check_valid_folder(graph_folder_path):
         print(f"{graph_folder_path} is not a folder!")
         exit(-1)
 
-def get_big_graphs_cities_names() -> set:
+def get_big_graphs_cities_ids() -> set:
     big_graphs_indicators_path = pathlib.Path("./data/grafos_grandes.csv")
     big_graphs_df = pd.read_csv(big_graphs_indicators_path)
-    big_graphs_cities_names = set(big_graphs_df['core_city'].values)
-    return big_graphs_cities_names
+    big_graphs_cities_ids = set(big_graphs_df['uc_id'].values)
+    return big_graphs_cities_ids
 
 def get_indicators_df():
     indicators_from_paper_path = pathlib.Path('./data/indicators.csv')
