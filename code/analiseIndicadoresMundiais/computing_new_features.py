@@ -3,7 +3,6 @@ import osmnx as ox
 import networkx as nx
 import pathlib
 import multiprocessing
-# from concurrent.futures import ProcessPoolExecutor
 import warnings
 from timeit import default_timer as timer
 
@@ -22,23 +21,37 @@ def get_graphml_file_paths(graph_type:int) -> list:
     graph_folder_path = pathlib.Path('C:\\Users\\User\\Documents\\UFMG\\POC1\\world_graphs\\')
     check_valid_folder(graph_folder_path)
 
-    
     all_graph_files = graph_folder_path.glob('*.graphml')
-
+    big_graphs_cities_ids = get_big_graphs_cities_ids()
     target_graph_files = list()
 
-    big_graphs_cities_ids = get_big_graphs_cities_ids()
     if graph_type == GRAPH_TYPES['small']:
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] not in big_graphs_cities_ids]
+        target_graph_files = [
+            file for file in all_graph_files if get_city_id_from_filename(file) not in big_graphs_cities_ids
+            ]
+    
     elif graph_type == GRAPH_TYPES['big']:
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] in big_graphs_cities_ids]
+        #Because of memory restrictions, cities with 300_000 plus nodes cant be processed
+        #These are: tokyo, jakarta, osaka_kyoto, nagoya, mexico_city
+        unprocessable_cities_path = pathlib.Path('./data/unprocessable_cities.csv')
+        unprocessable_cities_df = pd.read_csv(unprocessable_cities_path)
+        unprocessable_cities_ids = unprocessable_cities_df['uc_id'].values
+        for file in all_graph_files:
+            city_id = get_city_id_from_filename(file)
+            if city_id not in unprocessable_cities_ids and city_id in big_graphs_cities_ids:
+                target_graph_files.append(file)
+
     elif graph_type == GRAPH_TYPES['target']:
-        target_cities = [
-            '906', '952', '12812', '12879'
-        ]
-        target_graph_files = [file for file in all_graph_files if file.stem.split('-')[1] in target_cities]
+        #This is for when I want to process specific cities
+        target_cities_ids_as_ints = []
+        target_graph_files = [
+            file for file in all_graph_files if get_city_id_from_filename(file) in target_cities_ids_as_ints
+            ]
     
     return target_graph_files
+
+def get_city_id_from_filename(filename:str) -> int:
+    return int(filename.stem.split('-')[1])
 
 def check_valid_folder(graph_folder_path):
     if not graph_folder_path.exists():
@@ -80,8 +93,6 @@ def compute_features(graph_path:pathlib.Path, indicators_df:pd.DataFrame) -> dic
     try:
         G = ox.load_graphml(graph_path)
 
-        #Falta conseguir a área em metros quadrados para computar algumas outras features
-        #Para isso, devo ler também o arquivo de features já existentes.
         osmnx_features = compute_osmnx_features(G, full_features['city_id'], indicators_df)
         other_calculated_features = compute_other_features(osmnx_features)
         networkx_features = compute_networkx_features(G)
@@ -212,7 +223,7 @@ def save_features(features:list, graph_type:int, batch_count:int):
     features_df.to_csv(new_features_folder_path / file_name, index=False)
 
 def main():
-    TARGET_GRAPH_TYPE = GRAPH_TYPES['target']
+    TARGET_GRAPH_TYPE = GRAPH_TYPES['big']
     print(f"GRAPH TARGET TYPE: {TARGET_GRAPH_TYPE}")
     
     PROCESSES = get_num_processes_used(TARGET_GRAPH_TYPE)
@@ -226,10 +237,10 @@ def main():
 
     min_batch_size = get_save_step(TARGET_GRAPH_TYPE)
     print(f"BATCH MIN SIZE: {min_batch_size}")
-    STARTING_BATCH_ID = 0
+    STARTING_BATCH_ID = 6
     print(f"STARTING BATCH: {STARTING_BATCH_ID}")
     starting_batch_idx = STARTING_BATCH_ID*min_batch_size
-    NUM_BATCHES_TO_RUN = 1
+    NUM_BATCHES_TO_RUN = 20
     print(f"NUM BATCHES TO RUN: {NUM_BATCHES_TO_RUN}")
 
     curr_batch_id = STARTING_BATCH_ID
